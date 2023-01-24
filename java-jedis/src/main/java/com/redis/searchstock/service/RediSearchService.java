@@ -54,8 +54,7 @@ public class RediSearchService {
 
     IndexDefinition.Type indexType = IndexDefinition.Type.HASH;
     String fieldPrefix = "";
-    JedisPooled client;
-    JedisCluster cluster_client;
+    UnifiedJedis client;
     private static final Gson gson = new Gson();
 
 
@@ -88,10 +87,10 @@ public class RediSearchService {
             log.info("redisPassword is " + redisPassword + "empty is " + redisPassword.isEmpty());
             if(redisPassword != null && !(redisPassword.isEmpty())) {
                 log.info("before cluster create " + redisPassword);
-                cluster_client = new JedisCluster(hostAndPort, Protocol.DEFAULT_TIMEOUT, Protocol.DEFAULT_TIMEOUT,
+                client = new JedisCluster(hostAndPort, Protocol.DEFAULT_TIMEOUT, Protocol.DEFAULT_TIMEOUT,
                         10, redisPassword, new ConnectionPoolConfig());
             } else {
-                cluster_client = new JedisCluster(hostAndPort, Protocol.DEFAULT_TIMEOUT, 10,
+                client = new JedisCluster(hostAndPort, Protocol.DEFAULT_TIMEOUT, 10,
                         new ConnectionPoolConfig());
             }
 
@@ -349,27 +348,7 @@ public class RediSearchService {
                 .addField(new Schema.Field(FieldName.of(fieldPrefix + "mostrecent").as("mostrecent"), Schema.FieldType.TAG))
                 .addField(new Schema.Field(FieldName.of(fieldPrefix + "date").as("date"), Schema.FieldType.NUMERIC))
                 .addField(new Schema.Field(FieldName.of(fieldPrefix + "volume").as("volume"), Schema.FieldType.NUMERIC));
-        if(env.getProperty("redis.oss").equals("true")) {
-            Map<String, ConnectionPool> clusterNodes = cluster_client.getClusterNodes();
-            Collection<ConnectionPool> values = clusterNodes.values();
-            values.forEach(jedisPool -> {
-                try (UnifiedJedis jedis = new UnifiedJedis(jedisPool.getResource())) {
-                    tryIndex(jedis, indexRule, schema);
-                }
-            });
-        } else {
-            tryIndex(client, indexRule, schema);
-        }
-    }
-    public void tryIndex(UnifiedJedis jedis_client, IndexDefinition indexRule, Schema schema) {
-        log.info("rebuilding index on ");
-        try {
-            jedis_client.ftCreate(indexName, IndexOptions.defaultOptions().setDefinition(indexRule), schema);
-        } catch (Exception e) {
-            jedis_client.ftDropIndex(indexName);
-            jedis_client.ftCreate(indexName, IndexOptions.defaultOptions().setDefinition(indexRule), schema);
-        }
-
+        client.broadcast().ftCreate(indexName, IndexOptions.defaultOptions().setDefinition(indexRule), schema);
     }
 
     public String convertHashResults(SearchResult searchResult) throws JsonProcessingException {
